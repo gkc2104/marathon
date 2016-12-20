@@ -20,6 +20,8 @@ import org.apache.curator.test.TestingServer
   * Runs ZooKeeper in memory at the given port.
   * The server can be started and stopped at will.
   *
+  * We wrap ZookeeperServer to give it an interface more consistent with how we start mesos and forked marathon
+  *
   * close() should be called when the server is no longer necessary (e.g. try-with-resources)
   *
   * @param autoStart Start zookeeper in the background
@@ -42,13 +44,39 @@ case class ZookeeperServer(
       maxClientConnections
     )
   }
+  private var running = autoStart
   private val zkServer = new TestingServer(config, autoStart)
 
-  val connectUri = s"127.0.0.1:$port"
+  def connectUri = zkServer.getConnectString
+  /**
+    * Starts or restarts the server. If the server is currently running it will be stopped
+    * and restarted. If it's not currently running then it will be started. If
+    * it has been closed (had close() called on it) then an exception will be
+    * thrown.
+    */
+  def start(): Unit = synchronized {
+    if (!running) {
+      // TestingServer can't be restarted with the start method, restart works for initial start and restart.
+      zkServer.restart()
+      running = true
+    }
+  }
 
-  def start(): Unit = zkServer.start()
-  def stop(): Unit = zkServer.stop()
-  def close(): Unit = zkServer.close()
+  /**
+    * Stop the server without deleting the temp directory
+    */
+  def stop(): Unit = synchronized {
+    if (running) {
+      zkServer.stop()
+      running = false
+    }
+  }
+
+  /**
+    * Close the server and any open clients and delete the temp directory
+    */
+  def close(): Unit =
+    zkServer.close()
 }
 
 trait ZookeeperServerTest extends BeforeAndAfterAll { this: Suite with ScalaFutures =>
